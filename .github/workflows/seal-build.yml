@@ -1,0 +1,131 @@
+# Authored by the sealed-libraries builder: Spring Framework 4.2.0 ships no
+# GitHub Actions CI (it built on build.spring.io Bamboo). This workflow mirrors
+# the project's own Gradle build: the 2.5 wrapper on JDK 8 (compileTestJava is
+# 1.8 + -parameters; compileJava still targets 1.6), running the module's JUnit
+# suite and then its jar task.
+name: seal-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Gradle test task + selector (e.g. ':spring-expression:test --tests *SpelParserTests'); empty runs the full module suite"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: "-Xmx2g -XX:MaxPermSize=512m -Dfile.encoding=UTF-8"
+      MODULE: spring-expression
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Gradle test-logging init script
+        run: |
+          # Gradle 2.5 prints nothing per test on a plain console; emit per-suite
+          # and total counts plus every skipped/failed test into the job log.
+          cat > "$RUNNER_TEMP/seal-test-logging.gradle" <<'GRADLE'
+          allprojects {
+            tasks.withType(Test) {
+              testLogging {
+                events "failed", "skipped"
+                exceptionFormat "full"
+              }
+              afterSuite { desc, result ->
+                if (desc.className != null) {
+                  println "TEST SUITE ${desc.className}: ${result.testCount} tests, ${result.successfulTestCount} passed, ${result.failedTestCount} failed, ${result.skippedTestCount} skipped"
+                }
+                if (desc.parent == null) {
+                  println "TEST TOTALS (${project.path}): ${result.testCount} tests, ${result.successfulTestCount} passed, ${result.failedTestCount} failed, ${result.skippedTestCount} skipped -> ${result.resultType}"
+                }
+              }
+            }
+          }
+          GRADLE
+
+      - name: Test
+        run: |
+          set -e
+          ARGS="--no-daemon --console=plain --stacktrace -I $RUNNER_TEMP/seal-test-logging.gradle"
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            ./gradlew $ARGS ${{ inputs.test-filter }}
+          else
+            ./gradlew $ARGS :spring-expression:test
+          fi
+
+      - name: Test report (counts and skip reasons)
+        if: ${{ !cancelled() }}
+        run: |
+          cat > "$RUNNER_TEMP/seal_junit_report.py" <<'PY'
+          import glob, os, re, sys
+          import xml.etree.ElementTree as ET
+
+          module = sys.argv[1]
+          src_root = os.path.join(module, "src", "test", "java")
+          files = sorted(glob.glob(os.path.join(module, "build", "test-results", "TEST-*.xml")))
+          tot = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          skipped = []
+          for f in files:
+              root = ET.parse(f).getroot()
+              for k in tot:
+                  tot[k] += int(root.get(k, 0))
+              for tc in root.iter("testcase"):
+                  if tc.find("skipped") is not None:
+                      skipped.append((tc.get("classname"), tc.get("name")))
+
+          def source_of(cls):
+              p = os.path.join(src_root, cls.split("$")[0].replace(".", "/") + ".java")
+              return open(p, encoding="utf-8").read() if os.path.exists(p) else ""
+
+          def reason(cls, meth):
+              src = source_of(cls)
+              m = re.search(r"((?:@\w+(?:\([^)]*\))?\s*)*)public\s+void\s+" + re.escape(meth) + r"\s*\(", src)
+              if m:
+                  ann = m.group(1)
+                  ig = re.search(r"@Ignore(?:\(\s*\"([^\"]*)\"\s*\))?", ann)
+                  if ig:
+                      return "@Ignore on method" + (": " + ig.group(1) if ig.group(1) else " (upstream-disabled test)")
+                  body = src[m.end():m.end() + 1500]
+                  g = re.search(r"Assume\.group\(TestGroup\.(\w+)\)", body)
+                  if g:
+                      return "Assume.group(TestGroup.%s): upstream opt-in group, runs only with -PtestGroups=%s" % (g.group(1), g.group(1).lower())
+              if re.search(r"@Ignore\s*(?:\([^)]*\))?\s*public\s+(?:abstract\s+)?class", src):
+                  return "@Ignore on class (upstream-disabled: timing-sensitive interpreted-vs-compiled performance comparison)"
+              g = re.search(r"Assume\.group\(TestGroup\.(\w+)\)", src)
+              if g:
+                  return "Assume.group(TestGroup.%s) in class setup: upstream opt-in group" % g.group(1)
+              return "skipped by an upstream assumption"
+
+          print("===== JUNIT SUMMARY (%s): result files=%d tests=%d failures=%d errors=%d skipped=%d passed=%d =====" % (
+              module, len(files), tot["tests"], tot["failures"], tot["errors"], tot["skipped"],
+              tot["tests"] - tot["failures"] - tot["errors"] - tot["skipped"]))
+          for cls, meth in skipped:
+              print("SKIPPED %s.%s -- %s" % (cls, meth, reason(cls, meth)))
+          if not files or tot["failures"] or tot["errors"]:
+              sys.exit(1)
+          PY
+          python3 "$RUNNER_TEMP/seal_junit_report.py" "$MODULE" | tee "$RUNNER_TEMP/junit-summary.txt"
+
+      - name: Build jar
+        run: ./gradlew --no-daemon --console=plain --stacktrace :spring-expression:jar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spring-expression-jar
+          path: spring-expression/build/libs/spring-expression-4.2.0.RELEASE.jar
+          if-no-files-found: error
+
+      - name: Final summary
+        if: ${{ !cancelled() }}
+        run: |
+          echo "gradle :spring-expression:test results:"
+          grep "JUNIT SUMMARY" "$RUNNER_TEMP/junit-summary.txt"
+          ls -l spring-expression/build/libs/
