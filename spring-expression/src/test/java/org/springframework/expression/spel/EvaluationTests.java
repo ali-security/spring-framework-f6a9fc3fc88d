@@ -439,6 +439,37 @@ public class EvaluationTests extends AbstractExpressionTests {
 		evaluateAndCheckError("'abc' matches #regex", Boolean.class, SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, 6);
 	}
 
+	@Test
+	public void matchesWithPatternLengthThresholdForUnseenAndRepeatedEvaluation() {
+		StandardEvaluationContext evaluationContext = new StandardEvaluationContext();
+		Expression expr = parser.parseExpression("#input matches #regex");
+
+		String pattern = String.format("^(%s|X)", repeat("12345", 199));
+		assertEquals(1000, pattern.length());
+		evaluationContext.setVariable("input", "X");
+		evaluationContext.setVariable("regex", pattern);
+		assertTrue(expr.getValue(evaluationContext, Boolean.class));
+		assertTrue(expr.getValue(evaluationContext, Boolean.class));
+
+		pattern += "?";
+		assertEquals(1001, pattern.length());
+		evaluationContext.setVariable("regex", pattern);
+		// The regex has never been seen before: it must be rejected up front ...
+		assertMaxRegexLengthExceeded(expr, evaluationContext);
+		// ... and it must still be rejected on a repeated evaluation.
+		assertMaxRegexLengthExceeded(expr, evaluationContext);
+	}
+
+	private static void assertMaxRegexLengthExceeded(Expression expr, EvaluationContext evaluationContext) {
+		try {
+			expr.getValue(evaluationContext, Boolean.class);
+			fail("Expected SpelEvaluationException with message " + SpelMessage.MAX_REGEX_LENGTH_EXCEEDED);
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, ex.getMessageCode());
+		}
+	}
+
 	// mixing operators
 	@Test
 	public void testMixingOperators01() {

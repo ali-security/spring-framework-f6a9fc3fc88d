@@ -16,6 +16,7 @@
 
 package org.springframework.expression.spel.ast;
 
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
@@ -41,6 +42,11 @@ import org.springframework.expression.spel.support.BooleanTypedValue;
 public class OperatorMatches extends Operator {
 
 	/**
+	 * Maximum number of compiled regular expressions in the pattern cache: {@value}.
+	 */
+	public static final int MAX_PATTERN_CACHE_SIZE = 256;
+
+	/**
 	 * Maximum number of characters permitted in a regular expression.
 	 */
 	private static final int MAX_REGEX_LENGTH = 1000;
@@ -54,7 +60,7 @@ public class OperatorMatches extends Operator {
 	 * with a shared pattern cache instead.
 	 */
 	public OperatorMatches(int pos, SpelNodeImpl... operands) {
-		this(new ConcurrentHashMap<String, Pattern>(), pos, operands);
+		this(new BoundedPatternCache(MAX_PATTERN_CACHE_SIZE), pos, operands);
 	}
 
 	/**
@@ -89,14 +95,17 @@ public class OperatorMatches extends Operator {
 			throw new SpelEvaluationException(rightOp.getStartPosition(),
 					SpelMessage.INVALID_SECOND_OPERAND_FOR_MATCHES_OPERATOR, right);
 		}
+		String rightString = (String) right;
+		if (rightString.length() > MAX_REGEX_LENGTH) {
+			throw new SpelEvaluationException(getStartPosition(),
+					SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, MAX_REGEX_LENGTH);
+		}
 
 		state.trackOperation();
 		try {
 			String leftString = (String) left;
-			String rightString = (String) right;
 			Pattern pattern = this.patternCache.get(rightString);
 			if (pattern == null) {
-				checkRegexLength(rightString);
 				pattern = Pattern.compile(rightString);
 				this.patternCache.putIfAbsent(rightString, pattern);
 			}
@@ -108,10 +117,44 @@ public class OperatorMatches extends Operator {
 		}
 	}
 
-	private void checkRegexLength(String regex) {
-		if (regex.length() > MAX_REGEX_LENGTH) {
-			throw new SpelEvaluationException(getStartPosition(),
-					SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, MAX_REGEX_LENGTH);
+
+	/**
+	 * Pattern cache used when no shared pattern cache is supplied, bounded by
+	 * the size limit given to the constructor: once that limit has been reached,
+	 * further patterns are compiled for the current evaluation only and are not
+	 * added to the cache.
+	 */
+	private static final class BoundedPatternCache extends ConcurrentHashMap<String, Pattern> {
+
+		private static final long serialVersionUID = 1L;
+
+		private final int sizeLimit;
+
+		BoundedPatternCache(int sizeLimit) {
+			this.sizeLimit = sizeLimit;
+		}
+
+		@Override
+		public synchronized Pattern put(String key, Pattern value) {
+			if (size() >= this.sizeLimit && !containsKey(key)) {
+				return null;
+			}
+			return super.put(key, value);
+		}
+
+		@Override
+		public synchronized Pattern putIfAbsent(String key, Pattern value) {
+			if (size() >= this.sizeLimit && !containsKey(key)) {
+				return null;
+			}
+			return super.putIfAbsent(key, value);
+		}
+
+		@Override
+		public void putAll(Map<? extends String, ? extends Pattern> map) {
+			for (Map.Entry<? extends String, ? extends Pattern> entry : map.entrySet()) {
+				put(entry.getKey(), entry.getValue());
+			}
 		}
 	}
 

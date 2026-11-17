@@ -17,8 +17,11 @@
 package org.springframework.expression.spel.standard;
 
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Stack;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -95,8 +98,9 @@ class InternalSpelExpressionParser extends TemplateAwareExpressionParser {
 	// For rules that build nodes, they are stacked here for return
 	private final Stack<SpelNodeImpl> constructedNodes = new Stack<SpelNodeImpl>();
 
-	// Shared cache for compiled regex patterns
-	private final ConcurrentMap<String, Pattern> patternCache = new ConcurrentHashMap<String, Pattern>();
+	// Shared cache for compiled regex patterns (bounded, least recently used)
+	private final ConcurrentMap<String, Pattern> patternCache =
+			new PatternCache(OperatorMatches.MAX_PATTERN_CACHE_SIZE);
 
 	// The expression being parsed
 	private String expressionString;
@@ -1038,6 +1042,77 @@ class InternalSpelExpressionParser extends TemplateAwareExpressionParser {
 
 	private int toPos(int start,int end) {
 		return (start<<16) + end;
+	}
+
+
+	/**
+	 * Simple LRU (Least Recently Used) cache of compiled regex patterns, shared
+	 * by all {@link OperatorMatches} nodes created by the same parser and bounded
+	 * by the size limit given to the constructor.
+	 * <p>This implementation is backed by the {@code ConcurrentHashMap} it extends
+	 * for storing the compiled patterns and an access-ordered {@code LinkedHashMap}
+	 * for tracking the usage order of the keys and choosing the least recently used
+	 * key when the cache is at full capacity.
+	 */
+	private static final class PatternCache extends ConcurrentHashMap<String, Pattern> {
+
+		private static final long serialVersionUID = 1L;
+
+		private final int sizeLimit;
+
+		// Usage order of the cached keys, least recently used first (guarded by itself)
+		private final LinkedHashMap<String, Boolean> usageOrder =
+				new LinkedHashMap<String, Boolean>(16, 0.75f, true);
+
+		PatternCache(int sizeLimit) {
+			this.sizeLimit = sizeLimit;
+		}
+
+		@Override
+		public Pattern get(Object key) {
+			Pattern cached = super.get(key);
+			if (cached != null) {
+				synchronized (this.usageOrder) {
+					// Mark as most recently used
+					this.usageOrder.get(key);
+				}
+			}
+			return cached;
+		}
+
+		@Override
+		public Pattern put(String key, Pattern value) {
+			return add(key, value, false);
+		}
+
+		@Override
+		public Pattern putIfAbsent(String key, Pattern value) {
+			return add(key, value, true);
+		}
+
+		@Override
+		public void putAll(Map<? extends String, ? extends Pattern> map) {
+			for (Map.Entry<? extends String, ? extends Pattern> entry : map.entrySet()) {
+				put(entry.getKey(), entry.getValue());
+			}
+		}
+
+		private Pattern add(String key, Pattern value, boolean onlyIfAbsent) {
+			synchronized (this.usageOrder) {
+				Pattern cached = super.get(key);
+				if (cached == null) {
+					// Evict least recently used patterns until there is room for the new one
+					Iterator<String> leastUsed = this.usageOrder.keySet().iterator();
+					while (size() >= this.sizeLimit && leastUsed.hasNext()) {
+						super.remove(leastUsed.next());
+						leastUsed.remove();
+					}
+				}
+				// Add as (or mark as) most recently used
+				this.usageOrder.put(key, Boolean.TRUE);
+				return (cached != null && onlyIfAbsent ? cached : super.put(key, value));
+			}
+		}
 	}
 
 }
