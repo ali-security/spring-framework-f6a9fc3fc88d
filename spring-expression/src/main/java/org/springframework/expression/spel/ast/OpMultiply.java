@@ -25,6 +25,8 @@ import org.springframework.expression.Operation;
 import org.springframework.expression.TypedValue;
 import org.springframework.expression.spel.CodeFlow;
 import org.springframework.expression.spel.ExpressionState;
+import org.springframework.expression.spel.SpelEvaluationException;
+import org.springframework.expression.spel.SpelMessage;
 import org.springframework.util.NumberUtils;
 
 /**
@@ -50,6 +52,12 @@ import org.springframework.util.NumberUtils;
  * @since 3.0
  */
 public class OpMultiply extends Operator {
+
+	/**
+	 * Maximum number of characters permitted in repeated text.
+	 */
+	private static final int MAX_REPEATED_TEXT_SIZE = 256;
+
 
 	public OpMultiply(int pos, SpelNodeImpl... operands) {
 		super("*", pos, operands);
@@ -108,15 +116,26 @@ public class OpMultiply extends Operator {
 		}
 
 		if (leftOperand instanceof String && rightOperand instanceof Integer) {
-			int repeats = (Integer) rightOperand;
-			StringBuilder result = new StringBuilder();
-			for (int i = 0; i < repeats; i++) {
-				result.append(leftOperand);
+			String text = (String) leftOperand;
+			int count = (Integer) rightOperand;
+			// Compute the requested size as a long to avoid int overflow
+			long requestedSize = (long) text.length() * count;
+			checkRepeatedTextSize(requestedSize);
+			StringBuilder result = new StringBuilder(requestedSize > 0 ? (int) requestedSize : 0);
+			for (int i = 0; i < count; i++) {
+				result.append(text);
 			}
 			return new TypedValue(result.toString());
 		}
 
 		return state.operate(Operation.MULTIPLY, leftOperand, rightOperand);
+	}
+
+	private void checkRepeatedTextSize(long requestedSize) {
+		if (requestedSize > MAX_REPEATED_TEXT_SIZE) {
+			throw new SpelEvaluationException(getStartPosition(),
+					SpelMessage.MAX_REPEATED_TEXT_SIZE_EXCEEDED, MAX_REPEATED_TEXT_SIZE);
+		}
 	}
 
 	@Override

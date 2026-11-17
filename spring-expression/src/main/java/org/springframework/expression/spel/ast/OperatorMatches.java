@@ -40,11 +40,29 @@ import org.springframework.expression.spel.support.BooleanTypedValue;
  */
 public class OperatorMatches extends Operator {
 
-	private final ConcurrentMap<String, Pattern> patternCache = new ConcurrentHashMap<String, Pattern>();
+	/**
+	 * Maximum number of characters permitted in a regular expression.
+	 */
+	private static final int MAX_REGEX_LENGTH = 1000;
+
+	private final ConcurrentMap<String, Pattern> patternCache;
 
 
+	/**
+	 * Create a new {@link OperatorMatches} instance.
+	 * <p>Prefer {@link #OperatorMatches(ConcurrentMap, int, SpelNodeImpl...)}
+	 * with a shared pattern cache instead.
+	 */
 	public OperatorMatches(int pos, SpelNodeImpl... operands) {
+		this(new ConcurrentHashMap<String, Pattern>(), pos, operands);
+	}
+
+	/**
+	 * Create a new {@link OperatorMatches} instance with a shared pattern cache.
+	 */
+	public OperatorMatches(ConcurrentMap<String, Pattern> patternCache, int pos, SpelNodeImpl... operands) {
 		super("matches", pos, operands);
+		this.patternCache = patternCache;
 	}
 
 
@@ -77,6 +95,7 @@ public class OperatorMatches extends Operator {
 			String rightString = (String) right;
 			Pattern pattern = this.patternCache.get(rightString);
 			if (pattern == null) {
+				checkRegexLength(rightString);
 				pattern = Pattern.compile(rightString);
 				this.patternCache.putIfAbsent(rightString, pattern);
 			}
@@ -85,6 +104,13 @@ public class OperatorMatches extends Operator {
 		}
 		catch (PatternSyntaxException ex) {
 			throw new SpelEvaluationException(rightOp.getStartPosition(), ex, SpelMessage.INVALID_PATTERN, right);
+		}
+	}
+
+	private void checkRegexLength(String regex) {
+		if (regex.length() > MAX_REGEX_LENGTH) {
+			throw new SpelEvaluationException(getStartPosition(),
+					SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, MAX_REGEX_LENGTH);
 		}
 	}
 

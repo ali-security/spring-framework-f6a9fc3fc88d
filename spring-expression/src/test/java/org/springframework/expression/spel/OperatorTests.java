@@ -21,10 +21,12 @@ import java.math.BigInteger;
 
 import org.junit.Test;
 
+import org.springframework.expression.Expression;
 import org.springframework.expression.spel.ast.Operator;
 import org.springframework.expression.spel.standard.SpelExpression;
 
 import static org.junit.Assert.*;
+import static org.springframework.expression.spel.SpelMessage.MAX_REPEATED_TEXT_SIZE_EXCEEDED;
 
 /**
  * Tests the evaluation of expressions using relational operators.
@@ -325,11 +327,6 @@ public class OperatorTests extends AbstractExpressionTests {
 	}
 
 	@Test
-	public void testMultiplyStringInt() {
-		evaluate("'a' * 5", "aaaaa", String.class);
-	}
-
-	@Test
 	public void testMultiplyDoubleDoubleGivesDouble() {
 		evaluate("3.0d * 5.0d", 15.0d, Double.class);
 	}
@@ -574,6 +571,39 @@ public class OperatorTests extends AbstractExpressionTests {
 		evaluate("'abc' == 'def'", false, Boolean.class);
 		evaluate("'abc' != 'abc'", false, Boolean.class);
 		evaluate("'abc' != 'def'", true, Boolean.class);
+	}
+
+	@Test
+	public void stringRepeat() {
+		evaluate("'abc' * 0", "", String.class);
+		evaluate("'abc' * 1", "abc", String.class);
+		evaluate("'abc' * 2", "abcabc", String.class);
+
+		Expression expr = parser.parseExpression("'a' * 256");
+		assertEquals(256, expr.getValue(eContext, String.class).length());
+
+		// 4 is the position of the '*' (repeat operator)
+		evaluateAndCheckError("'a' * 257", String.class, MAX_REPEATED_TEXT_SIZE_EXCEEDED, 4);
+	}
+
+	@Test
+	public void stringRepeatWithOverflowingRequestedSize() {
+		// 65536 * 65536 overflows an int to 0: the size check must not be bypassed
+		StringBuilder text = new StringBuilder(65536);
+		for (int i = 0; i < 65536; i++) {
+			text.append('a');
+		}
+		eContext.setVariable("text", text.toString());
+
+		// 6 is the position of the '*' (repeat operator)
+		evaluateAndCheckError("#text * 65536", String.class, MAX_REPEATED_TEXT_SIZE_EXCEEDED, 6);
+		// 2 * 2^30 overflows an int to a negative value
+		evaluateAndCheckError("'ab' * 1073741824", String.class, MAX_REPEATED_TEXT_SIZE_EXCEEDED, 5);
+	}
+
+	@Test
+	public void stringRepeatWithNegativeCount() {
+		evaluate("'abc' * -1", "", String.class);
 	}
 
 	@Test

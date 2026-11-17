@@ -215,6 +215,30 @@ public class EvaluationTests extends AbstractExpressionTests {
 		evaluate("27 matches '^.*2.*$'", true, Boolean.class); // conversion int>string
 	}
 
+	@Test
+	public void testMatchesWithPatternLengthThreshold() {
+		String pattern = String.format("^(%s|X)", repeat("12345", 199));
+		assertEquals(1000, pattern.length());
+		Expression expr = parser.parseExpression("'X' matches '" + pattern + "'");
+		assertTrue(expr.getValue(eContext, Boolean.class));
+
+		pattern += "?";
+		assertEquals(1001, pattern.length());
+		evaluateAndCheckError("'abc' matches '" + pattern + "'", Boolean.class, SpelMessage.MAX_REGEX_LENGTH_EXCEEDED);
+
+		// regex supplied at evaluation time rather than as a literal
+		eContext.setVariable("regex", pattern);
+		evaluateAndCheckError("'abc' matches #regex", Boolean.class, SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, 6);
+	}
+
+	private String repeat(String str, int count) {
+		String result = "";
+		for (int i = 0; i < count; i++) {
+			result += str;
+		}
+		return result;
+	}
+
 	// mixing operators
 	@Test
 	public void testMixingOperators01() {
