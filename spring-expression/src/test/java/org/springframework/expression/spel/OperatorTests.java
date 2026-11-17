@@ -576,6 +576,8 @@ public class OperatorTests extends AbstractExpressionTests {
 
 	@Test
 	public void stringRepeat() {
+		evaluate("'' * 0", "", String.class);
+		evaluate("'' * 2", "", String.class);
 		evaluate("'abc' * 0", "", String.class);
 		evaluate("'abc' * 1", "abc", String.class);
 		evaluate("'abc' * 2", "abcabc", String.class);
@@ -632,11 +634,18 @@ public class OperatorTests extends AbstractExpressionTests {
 		assertEquals(maxSize, expr.getValue(eContext, String.class).length());
 
 		// Text is too big
+		eContext.setVariable("text1", createString(maxSize));
+		eContext.setVariable("text2", createString(maxSize));
+		evaluateAndCheckError("#text1 + #text2", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 7);
+
 		eContext.setVariable("text1", createString(maxSize + 1));
 		evaluateAndCheckError("#text1 + ''", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 7);
 		evaluateAndCheckError("#text1 + true", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 7);
 		evaluateAndCheckError("'' + #text1", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 3);
 		evaluateAndCheckError("true + #text1", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 5);
+
+		eContext.setVariable("text1", createString(maxSize - 1));
+		evaluateAndCheckError("#text1 + 'YZ'", String.class, MAX_CONCATENATED_STRING_LENGTH_EXCEEDED, 7);
 
 		eContext.setVariable("text1", createString(maxSize / 2));
 		eContext.setVariable("text2", createString((maxSize / 2) + 1));
