@@ -36,6 +36,7 @@ import org.springframework.expression.MethodExecutor;
 import org.springframework.expression.MethodFilter;
 import org.springframework.expression.MethodResolver;
 import org.springframework.expression.ParseException;
+import org.springframework.expression.common.TemplateParserContext;
 import org.springframework.expression.spel.standard.SpelExpression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
@@ -56,6 +57,58 @@ import static org.junit.Assert.*;
  * @since 3.0
  */
 public class EvaluationTests extends AbstractExpressionTests {
+
+	@Test
+	public void expressionLength() {
+		String expression = String.format("'X' + '%s'", repeat(" ", 9992));
+		assertEquals(10000, expression.length());
+		Expression expr = parser.parseExpression(expression);
+		String result = expr.getValue(eContext, String.class);
+		assertEquals(9993, result.length());
+		assertEquals("X", result.trim());
+
+		expression = String.format("'X' + '%s'", repeat(" ", 9993));
+		assertEquals(10001, expression.length());
+		evaluateAndCheckError(expression, String.class, SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED);
+	}
+
+	@Test
+	public void maxExpressionLengthIsConfigurable() {
+		int maximumExpressionLength = 20000;
+
+		String expression = String.format("'%s'", repeat("Y", 19998));
+		assertEquals(maximumExpressionLength, expression.length());
+
+		SpelParserConfiguration configuration =
+				new SpelParserConfiguration(null, null, false, false, 0, maximumExpressionLength);
+		ExpressionParser parser = new SpelExpressionParser(configuration);
+
+		Expression expr = parser.parseExpression(expression);
+		String result = expr.getValue(String.class);
+		assertEquals(19998, result.length());
+
+		expression = String.format("'%s'", repeat("Y", 25000));
+		assertEquals(25002, expression.length());
+		evaluateAndCheckError(parser, expression, String.class, SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED);
+	}
+
+	@Test
+	public void expressionLengthInTemplate() {
+		String expression = String.format("Value: #{'X' + '%s'}", repeat(" ", 9992));
+		Expression expr = parser.parseExpression(expression, new TemplateParserContext());
+		String result = expr.getValue(eContext, String.class);
+		assertEquals("Value: X", result.trim());
+
+		// each embedded expression in a template is subject to the same limit
+		expression = String.format("Value: #{'X' + '%s'}", repeat(" ", 9993));
+		try {
+			parser.parseExpression(expression, new TemplateParserContext());
+			fail("Should have failed with message " + SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED);
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED, ex.getMessageCode());
+		}
+	}
 
 	@Test
 	public void testCreateListsOnAttemptToIndexNull01() throws EvaluationException, ParseException {
@@ -229,14 +282,6 @@ public class EvaluationTests extends AbstractExpressionTests {
 		// regex supplied at evaluation time rather than as a literal
 		eContext.setVariable("regex", pattern);
 		evaluateAndCheckError("'abc' matches #regex", Boolean.class, SpelMessage.MAX_REGEX_LENGTH_EXCEEDED, 6);
-	}
-
-	private String repeat(String str, int count) {
-		String result = "";
-		for (int i = 0; i < count; i++) {
-			result += str;
-		}
-		return result;
 	}
 
 	// mixing operators
@@ -1482,6 +1527,16 @@ public class EvaluationTests extends AbstractExpressionTests {
 		assertEquals(100,helper.iii);
 
 	}
+
+
+	private static String repeat(String str, int count) {
+		String result = "";
+		for (int i = 0; i < count; i++) {
+			result += str;
+		}
+		return result;
+	}
+
 
 	static class MyBeanResolver implements BeanResolver {
 

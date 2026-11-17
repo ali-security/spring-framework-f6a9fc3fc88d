@@ -20,7 +20,9 @@ import org.junit.Test;
 
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.EvaluationException;
+import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionException;
+import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.ParseException;
 import org.springframework.expression.spel.SpelMessage;
 import org.springframework.expression.spel.SpelNode;
@@ -35,6 +37,15 @@ import static org.junit.Assert.*;
  * @author Andy Clement
  */
 public class SpelParserTests {
+
+	@Test  // gh-30464
+	public void nullExpression() {
+		ExpressionParser parser = new SpelExpressionParser();
+		String expression = null;
+		Expression expr = parser.parseExpression(expression);
+		Object result = expr.getValue();
+		assertNull(result);
+	}
 
 	@Test
 	public void theMostBasic() throws EvaluationException, ParseException {

@@ -178,6 +178,24 @@ public abstract class AbstractExpressionTests {
 	 */
 	protected void evaluateAndCheckError(String expression, Class<?> expectedReturnType, SpelMessage expectedMessage,
 			Object... otherProperties) {
+
+		evaluateAndCheckError(this.parser, expression, expectedReturnType, expectedMessage, otherProperties);
+	}
+
+	/**
+	 * Evaluate the specified expression and ensure the expected message comes out.
+	 * The message may have inserts and they will be checked if otherProperties is specified.
+	 * The first entry in otherProperties should always be the position.
+	 * @param parser the expression parser to use
+	 * @param expression the expression to evaluate
+	 * @param expectedReturnType ask the expression return value to be of this type if possible
+	 * ({@code null} indicates don't ask for conversion)
+	 * @param expectedMessage the expected message
+	 * @param otherProperties the expected inserts within the message
+	 */
+	protected void evaluateAndCheckError(ExpressionParser parser, String expression, Class<?> expectedReturnType, SpelMessage expectedMessage,
+			Object... otherProperties) {
+
 		try {
 			Expression expr = parser.parseExpression(expression);
 			if (expr == null) {

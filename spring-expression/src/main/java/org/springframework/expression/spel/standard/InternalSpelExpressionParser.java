@@ -28,6 +28,7 @@ import org.springframework.expression.ParseException;
 import org.springframework.expression.ParserContext;
 import org.springframework.expression.common.TemplateAwareExpressionParser;
 import org.springframework.expression.spel.InternalParseException;
+import org.springframework.expression.spel.SpelEvaluationException;
 import org.springframework.expression.spel.SpelMessage;
 import org.springframework.expression.spel.SpelParseException;
 import org.springframework.expression.spel.SpelParserConfiguration;
@@ -121,6 +122,8 @@ class InternalSpelExpressionParser extends TemplateAwareExpressionParser {
 
 	@Override
 	protected SpelExpression doParseExpression(String expressionString, ParserContext context) throws ParseException {
+		checkExpressionLength(expressionString);
+
 		try {
 			this.expressionString = expressionString;
 			Tokenizer tokenizer = new Tokenizer(expressionString);
@@ -138,6 +141,15 @@ class InternalSpelExpressionParser extends TemplateAwareExpressionParser {
 		}
 		catch (InternalParseException ex) {
 			throw ex.getCause();
+		}
+	}
+
+	private void checkExpressionLength(String string) {
+		if (string != null) {
+			int maxLength = this.configuration.getMaximumExpressionLength();
+			if (string.length() > maxLength) {
+				throw new SpelEvaluationException(SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED, maxLength);
+			}
 		}
 	}
 
