@@ -16,10 +16,15 @@
 
 package org.springframework.expression.spel;
 
+import java.util.ArrayList;
+
 import org.junit.Test;
 
+import org.springframework.expression.ConstructorResolver;
+import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
+import org.springframework.expression.spel.support.StandardEvaluationContext;
 
 import static org.junit.Assert.*;
 
@@ -120,12 +125,57 @@ public class ArrayConstructorTests extends AbstractExpressionTests {
 	}
 
 	@Test
+	public void noArrayConstruction() {
+		StandardEvaluationContext context = new StandardEvaluationContext();
+		context.setConstructorResolvers(new ArrayList<ConstructorResolver>());
+		try {
+			parser.parseExpression("new int[2]").getValue(context);
+			fail("Should have failed with message " + SpelMessage.CONSTRUCTOR_NOT_FOUND);
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.CONSTRUCTOR_NOT_FOUND, ex.getMessageCode());
+		}
+	}
+
+	@Test
+	public void noArrayConstructionWithoutConstructorResolvers() {
+		StandardEvaluationContext context = new StandardEvaluationContext();
+		context.setConstructorResolvers(new ArrayList<ConstructorResolver>());
+		String[] expressions = {"new int[2]", "new int[2][2]", "new int[3][2][1]", "new int[]{1,2,3}",
+				"new int[3]{1,2,3}", "new String[2]", "new String[]{'a','b'}", "new java.lang.String[2][2]",
+				"new long[256 * 1024 - 1]", "new int[262142][1]", "(new int[1][0][1024 * 1024]).length",
+				"new int[T(java.lang.Integer).MAX_VALUE]", "T(java.util.Arrays).toString(new long[256 * 1024 - 1])"};
+		for (String expression : expressions) {
+			assertNoArrayConstruction(context, expression);
+		}
+	}
+
+	@Test
+	public void arrayConstructionWithDefaultConstructorResolvers() {
+		StandardEvaluationContext context = new StandardEvaluationContext();
+		Object result = parser.parseExpression("new int[2]").getValue(context);
+		assertTrue(result instanceof int[]);
+		assertEquals(2, ((int[]) result).length);
+	}
+
+	@Test
 	public void constructorInvocation03() {
 		evaluateAndCheckError("new String[]", SpelMessage.MISSING_ARRAY_DIMENSION);
 	}
 
 	public void constructorInvocation04() {
 		evaluateAndCheckError("new Integer[3]{'3','ghi','5'}", SpelMessage.INCORRECT_ELEMENT_TYPE_FOR_ARRAY, 4);
+	}
+
+	private void assertNoArrayConstruction(EvaluationContext context, String expression) {
+		try {
+			Object result = parser.parseExpression(expression).getValue(context);
+			fail("Array construction should have been rejected for [" + expression + "] but got " + result);
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals("Unexpected message code for [" + expression + "]",
+					SpelMessage.CONSTRUCTOR_NOT_FOUND, ex.getMessageCode());
+		}
 	}
 
 	private String evaluateArrayBuildingExpression(String expression, String expectedToString) {
