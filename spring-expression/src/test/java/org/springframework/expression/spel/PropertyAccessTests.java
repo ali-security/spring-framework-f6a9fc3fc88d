@@ -16,7 +16,9 @@
 
 package org.springframework.expression.spel;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
@@ -30,7 +32,10 @@ import org.springframework.expression.PropertyAccessor;
 import org.springframework.expression.TypedValue;
 import org.springframework.expression.spel.standard.SpelExpression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
+import org.springframework.expression.spel.support.ReflectivePropertyAccessor;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.expression.spel.testresources.Person;
+import org.springframework.util.ClassUtils;
 
 import static org.junit.Assert.*;
 
@@ -161,6 +166,91 @@ public class PropertyAccessTests extends AbstractExpressionTests {
 		Expression expression = parser.parseExpression("name");
 		Object value = expression.getValue(new StandardEvaluationContext(String.class));
 		assertEquals(value, "java.lang.String");
+	}
+
+	@Test
+	public void voidReturningMethodIsNotTreatedAsPropertyGetter() throws Exception {
+		EvaluationContext context = new StandardEvaluationContext();
+		Person person = new Person("p1");
+		assertEquals("p1", parser.parseExpression("name").getValue(context, person));
+
+		try {
+			parser.parseExpression("nonexistent").getValue(context, person);
+			fail("Should have thrown SpelEvaluationException");
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.PROPERTY_OR_FIELD_NOT_READABLE, ex.getMessageCode());
+		}
+
+		Method getInvalid = ClassUtils.getMethod(Person.class, "getInvalid");
+		assertEquals(void.class, getInvalid.getReturnType());
+		try {
+			parser.parseExpression("invalid").getValue(context, person);
+			fail("Should have thrown SpelEvaluationException");
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.PROPERTY_OR_FIELD_NOT_READABLE, ex.getMessageCode());
+		}
+
+		// A void-returning method must never be selected as a property getter, since
+		// reading such a "property" would invoke the method purely for its side effects.
+		VoidAccessorTarget target = new VoidAccessorTarget();
+		assertVoidMethodsAreNotReadable(context, target);
+
+		ReflectivePropertyAccessor accessor = new ReflectivePropertyAccessor();
+		assertFalse(accessor.canRead(context, target, "invalid"));
+		assertSame(accessor, accessor.createOptimalAccessor(context, target, "invalid"));
+
+		assertEquals(Collections.emptyList(), target.invocations);
+	}
+
+	private void assertVoidMethodsAreNotReadable(EvaluationContext context, VoidAccessorTarget target) {
+		// "get"-prefixed void method: getInvalid()
+		try {
+			parser.parseExpression("invalid").getValue(context, target);
+			fail("Should have thrown SpelEvaluationException");
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.PROPERTY_OR_FIELD_NOT_READABLE, ex.getMessageCode());
+		}
+
+		// "is"-prefixed void method: isActive()
+		try {
+			parser.parseExpression("active").getValue(context, target);
+			fail("Should have thrown SpelEvaluationException");
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.PROPERTY_OR_FIELD_NOT_READABLE, ex.getMessageCode());
+		}
+
+		// Plain void method: shutdown()
+		try {
+			parser.parseExpression("shutdown").getValue(context, target);
+			fail("Should have thrown SpelEvaluationException");
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.PROPERTY_OR_FIELD_NOT_READABLE, ex.getMessageCode());
+		}
+	}
+
+
+	// Records every invocation, so that a void-returning method being mistaken for a
+	// property getter can be detected via the side effect it would have triggered.
+	static class VoidAccessorTarget {
+
+		final List<String> invocations = new ArrayList<String>();
+
+		public void getInvalid() {
+			this.invocations.add("getInvalid");
+		}
+
+		public void isActive() {
+			this.invocations.add("isActive");
+		}
+
+		public void shutdown() {
+			this.invocations.add("shutdown");
+		}
 	}
 
 
