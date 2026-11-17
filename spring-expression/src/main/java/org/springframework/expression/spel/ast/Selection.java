@@ -80,6 +80,7 @@ public class Selection extends SpelNodeImpl {
 		if (operand instanceof Map) {
 			Map<?, ?> mapdata = (Map<?, ?>) operand;
 			// TODO don't lose generic info for the new map
+			state.trackOperation();
 			Map<Object, Object> result = new HashMap<Object, Object>();
 			Object lastKey = null;
 
@@ -91,6 +92,7 @@ public class Selection extends SpelNodeImpl {
 					Object val = selectionCriteria.getValueInternal(state).getValue();
 					if (val instanceof Boolean) {
 						if ((Boolean) val) {
+							state.trackOperation();
 							if (this.variant == FIRST) {
 								result.put(entry.getKey(), entry.getValue());
 								return new ValueRef.TypedValueHolderValueRef(new TypedValue(result), this);
@@ -128,6 +130,7 @@ public class Selection extends SpelNodeImpl {
 			Iterable<?> data = (operand instanceof Iterable ?
 					(Iterable<?>) operand : Arrays.asList(ObjectUtils.toObjectArray(operand)));
 
+			state.trackOperation();
 			List<Object> result = new ArrayList<Object>();
 			int index = 0;
 			for (Object element : data) {
@@ -140,6 +143,7 @@ public class Selection extends SpelNodeImpl {
 							if (this.variant == FIRST) {
 								return new ValueRef.TypedValueHolderValueRef(new TypedValue(element), this);
 							}
+							state.trackOperation();
 							result.add(element);
 						}
 					}

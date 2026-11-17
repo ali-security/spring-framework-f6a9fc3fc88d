@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.junit.Test;
 
+import org.springframework.core.SpringProperties;
 import org.springframework.core.convert.TypeDescriptor;
 import org.springframework.expression.AccessException;
 import org.springframework.expression.BeanResolver;
@@ -45,6 +46,7 @@ import org.springframework.expression.spel.testresources.TestPerson;
 
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
+import static org.springframework.expression.spel.SpelParserConfiguration.SPRING_EXPRESSION_MAX_OPERATIONS_PROPERTY_NAME;
 
 /**
  * Tests the evaluation of real expressions in a real context.
@@ -107,6 +109,159 @@ public class EvaluationTests extends AbstractExpressionTests {
 		}
 		catch (SpelEvaluationException ex) {
 			assertEquals(SpelMessage.MAX_EXPRESSION_LENGTH_EXCEEDED, ex.getMessageCode());
+		}
+	}
+
+	@Test
+	public void maxOperationsIsConfigurableViaSpelParserConfiguration() {
+		int maxLength = 100;
+		int maxOperations = 10;
+
+		ExpressionParser parser = new SpelExpressionParser();
+
+		// The following expression contains 10 tracked operations:
+		String expression = "('foo' + 'bar').length() >= 6 && {1, 1 + 1, 3}.contains(3)";
+		Expression expr1 = parser.parseExpression(expression);
+		assertTrue(expr1.getValue(Boolean.class));
+
+		SpelParserConfiguration configuration =
+				new SpelParserConfiguration(SpelCompilerMode.OFF, null, false, false, 0, maxLength, maxOperations);
+		parser = new SpelExpressionParser(configuration);
+		Expression expr2 = parser.parseExpression(expression);
+		assertMaxOperationsExceeded(expr2, maxOperations);
+	}
+
+	@Test
+	public void maxOperationsIsConfigurableViaSpringProperty() {
+		int maxOperations = 10;
+
+		ExpressionParser parser = new SpelExpressionParser();
+
+		// The following expression contains 10 tracked operations:
+		String expression = "('foo' + 'bar').length() >= 6 && {1, 1 + 1, 3}.contains(3)";
+		Expression expr1 = parser.parseExpression(expression);
+		assertTrue(expr1.getValue(Boolean.class));
+
+		try {
+			SpringProperties.setProperty(SPRING_EXPRESSION_MAX_OPERATIONS_PROPERTY_NAME, "" + maxOperations);
+
+			parser = new SpelExpressionParser();
+			Expression expr2 = parser.parseExpression(expression);
+			assertMaxOperationsExceeded(expr2, maxOperations);
+		}
+		finally {
+			SpringProperties.setProperty(SPRING_EXPRESSION_MAX_OPERATIONS_PROPERTY_NAME, null);
+		}
+	}
+
+	@Test
+	public void maxOperationsConfiguredViaSpelParserConfigurationOverridesSpringProperty() {
+		int maxLength = 100;
+		int maxOperations = 10;
+
+		ExpressionParser parser = new SpelExpressionParser();
+
+		// The following expression contains 10 tracked operations:
+		String expression = "('foo' + 'bar').length() >= 6 && {1, 1 + 1, 3}.contains(3)";
+		Expression expr1 = parser.parseExpression(expression);
+		assertTrue(expr1.getValue(Boolean.class));
+
+		try {
+			SpringProperties.setProperty(SPRING_EXPRESSION_MAX_OPERATIONS_PROPERTY_NAME, "" + maxOperations / 2);
+
+			// maxOperations + 1 should override maxOperations / 2
+			SpelParserConfiguration configuration =
+					new SpelParserConfiguration(SpelCompilerMode.OFF, null, false, false, 0, maxLength, maxOperations + 1);
+			parser = new SpelExpressionParser(configuration);
+			expr1 = parser.parseExpression(expression);
+			assertTrue(expr1.getValue(Boolean.class));
+
+			configuration = new SpelParserConfiguration(SpelCompilerMode.OFF, null, false, false, 0, maxLength, maxOperations);
+			parser = new SpelExpressionParser(configuration);
+			Expression expr2 = parser.parseExpression(expression);
+			// Should fail due to maxOperations, not maxOperations / 2
+			assertMaxOperationsExceeded(expr2, maxOperations);
+		}
+		finally {
+			SpringProperties.setProperty(SPRING_EXPRESSION_MAX_OPERATIONS_PROPERTY_NAME, null);
+		}
+	}
+
+	@Test
+	public void nestedProjectionsAreBoundedByTheDefaultMaxOperations() {
+		// 5 nested projections over a 10-element list amount to 10^5 element evaluations.
+		String list = "{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}";
+		String expression = list + ".![" + list + ".![" + list + ".![" + list + ".![" + list + ".![#this]]]]]";
+		Expression expr = new SpelExpressionParser().parseExpression(expression);
+		assertMaxOperationsExceeded(expr, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+	}
+
+	@Test
+	public void nestedSelectionsAreBoundedByTheDefaultMaxOperations() {
+		// 5 nested selections over a 10-element list amount to 10^5 element evaluations.
+		String list = "{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}";
+		String expression = list + ".?[" + list + ".?[" + list + ".?[" + list + ".?[" + list +
+				".?[true].size() > 0].size() > 0].size() > 0].size() > 0]";
+		Expression expr = new SpelExpressionParser().parseExpression(expression);
+		assertMaxOperationsExceeded(expr, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+	}
+
+	@Test
+	public void repeatedStringConcatenationIsBoundedByTheDefaultMaxOperations() {
+		String list = "{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}";
+		String expression = list + ".![" + list + ".![" + list + ".![" + list + ".!['a' + 'b']]]]";
+		Expression expr = new SpelExpressionParser().parseExpression(expression);
+		assertMaxOperationsExceeded(expr, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+	}
+
+	@Test
+	public void inlineListConstantCreationIsBoundedByMaxOperations() {
+		int maxLength = 100000;
+		StringBuilder sb = new StringBuilder("{");
+		for (int i = 0; i < 12000; i++) {
+			if (i > 0) {
+				sb.append(',');
+			}
+			sb.append('1');
+		}
+		sb.append('}');
+
+		SpelParserConfiguration configuration = new SpelParserConfiguration(
+				SpelCompilerMode.OFF, null, false, false, 0, maxLength, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+		ExpressionParser parser = new SpelExpressionParser(configuration);
+		// Parsing a constant inline list must not eagerly materialize it.
+		Expression expr = parser.parseExpression(sb.toString());
+		assertMaxOperationsExceeded(expr, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+	}
+
+	@Test
+	public void inlineMapConstantCreationIsBoundedByMaxOperations() {
+		int maxLength = 100000;
+		StringBuilder sb = new StringBuilder("{");
+		for (int i = 0; i < 12000; i++) {
+			if (i > 0) {
+				sb.append(',');
+			}
+			sb.append("1:1");
+		}
+		sb.append('}');
+
+		SpelParserConfiguration configuration = new SpelParserConfiguration(
+				SpelCompilerMode.OFF, null, false, false, 0, maxLength, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+		ExpressionParser parser = new SpelExpressionParser(configuration);
+		// Parsing a constant inline map must not eagerly materialize it.
+		Expression expr = parser.parseExpression(sb.toString());
+		assertMaxOperationsExceeded(expr, SpelParserConfiguration.DEFAULT_MAX_OPERATIONS);
+	}
+
+	private static void assertMaxOperationsExceeded(Expression expression, int maxOperations) {
+		try {
+			expression.getValue();
+			fail("Should have failed with " + SpelMessage.MAX_OPERATIONS_EXCEEDED);
+		}
+		catch (SpelEvaluationException ex) {
+			assertEquals(SpelMessage.MAX_OPERATIONS_EXCEEDED, ex.getMessageCode());
+			assertArrayEquals("inserts", new Object[] {maxOperations}, ex.getInserts());
 		}
 	}
 

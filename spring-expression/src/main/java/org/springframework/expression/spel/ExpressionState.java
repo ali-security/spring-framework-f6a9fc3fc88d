@@ -68,6 +68,8 @@ public class ExpressionState {
 
 	private Stack<TypedValue> contextObjects;
 
+	private int operationsCount;
+
 
 	public ExpressionState(EvaluationContext context) {
 		this(context, context.getRootObject(), new SpelParserConfiguration(false, false));
@@ -137,10 +139,12 @@ public class ExpressionState {
 	}
 
 	public void setVariable(String name, Object value) {
+		trackOperation();
 		this.relatedContext.setVariable(name, value);
 	}
 
 	public TypedValue lookupVariable(String name) {
+		trackOperation();
 		Object value = this.relatedContext.lookupVariable(name);
 		if (value == null) {
 			return TypedValue.NULL;
@@ -218,6 +222,7 @@ public class ExpressionState {
 	public TypedValue operate(Operation op, Object left, Object right) throws EvaluationException {
 		OperatorOverloader overloader = this.relatedContext.getOperatorOverloader();
 		if (overloader.overridesOperation(op, left, right)) {
+			trackOperation();
 			Object returnValue = overloader.operate(op, left, right);
 			return new TypedValue(returnValue);
 		}
@@ -238,6 +243,17 @@ public class ExpressionState {
 
 	public SpelParserConfiguration getConfiguration() {
 		return this.configuration;
+	}
+
+	/**
+	 * Track an operation during expression evaluation.
+	 * @see SpelParserConfiguration#getMaximumOperations()
+	 */
+	public void trackOperation() {
+		int maxOperations = this.configuration.getMaximumOperations();
+		if (++this.operationsCount >= maxOperations) {
+			throw new SpelEvaluationException(SpelMessage.MAX_OPERATIONS_EXCEEDED, maxOperations);
+		}
 	}
 
 

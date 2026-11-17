@@ -267,7 +267,10 @@ public enum SpelMessage {
 			"Concatenated string is too long, exceeding the threshold of ''{0}'' characters"),
 
 	MAX_EXPRESSION_LENGTH_EXCEEDED(Kind.ERROR, 1079,
-			"SpEL expression is too long, exceeding the threshold of ''{0}'' characters");
+			"SpEL expression is too long, exceeding the threshold of ''{0}'' characters"),
+
+	MAX_OPERATIONS_EXCEEDED(Kind.ERROR, 1085,
+			"SpEL expression evaluation exceeded the threshold of ''{0}'' operations");
 
 
 	private final Kind kind;

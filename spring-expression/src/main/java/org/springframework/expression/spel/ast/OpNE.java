@@ -42,6 +42,7 @@ public class OpNE extends Operator {
 		Object right = getRightOperand().getValueInternal(state).getValue();
 		leftActualDescriptor = CodeFlow.toDescriptorFromObject(left);
 		rightActualDescriptor = CodeFlow.toDescriptorFromObject(right);
+		state.trackOperation();
 		return BooleanTypedValue.forValue(!equalityCheck(state, left, right));
 	}
 

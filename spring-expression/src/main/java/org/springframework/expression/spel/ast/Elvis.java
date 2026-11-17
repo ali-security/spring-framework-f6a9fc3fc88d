@@ -48,6 +48,7 @@ public class Elvis extends SpelNodeImpl {
 	 */
 	@Override
 	public TypedValue getValueInternal(ExpressionState state) throws EvaluationException {
+		state.trackOperation();
 		TypedValue value = this.children[0].getValueInternal(state);
 		if (!StringUtils.isEmpty(value.getValue())) {
 			return value;

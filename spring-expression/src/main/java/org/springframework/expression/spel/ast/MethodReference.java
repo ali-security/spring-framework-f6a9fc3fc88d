@@ -82,12 +82,12 @@ public class MethodReference extends SpelNodeImpl {
 		Object value = state.getActiveContextObject().getValue();
 		TypeDescriptor targetType = state.getActiveContextObject().getTypeDescriptor();
 		Object[] arguments = getArguments(state);
-		TypedValue result = getValueInternal(evaluationContext, value, targetType, arguments);
+		TypedValue result = getValueInternal(state, evaluationContext, value, targetType, arguments);
 		updateExitTypeDescriptor();
 		return result;
 	}
 
-	private TypedValue getValueInternal(EvaluationContext evaluationContext,
+	private TypedValue getValueInternal(ExpressionState state, EvaluationContext evaluationContext,
 			Object value, TypeDescriptor targetType, Object[] arguments) {
 
 		List<TypeDescriptor> argumentTypes = getArgumentTypes(arguments);
@@ -99,6 +99,7 @@ public class MethodReference extends SpelNodeImpl {
 		MethodExecutor executorToUse = getCachedExecutor(evaluationContext, value, targetType, argumentTypes);
 		if (executorToUse != null) {
 			try {
+				state.trackOperation();
 				return executorToUse.execute(evaluationContext, value, arguments);
 			}
 			catch (AccessException ex) {
@@ -126,6 +127,7 @@ public class MethodReference extends SpelNodeImpl {
 		this.cachedExecutor = new CachedMethodExecutor(
 				executorToUse, (value instanceof Class ? (Class<?>) value : null), targetType, argumentTypes);
 		try {
+			state.trackOperation();
 			return executorToUse.execute(evaluationContext, value, arguments);
 		}
 		catch (AccessException ex) {
@@ -322,6 +324,8 @@ public class MethodReference extends SpelNodeImpl {
 
 	private class MethodValueRef implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final EvaluationContext evaluationContext;
 
 		private final Object value;
@@ -331,6 +335,7 @@ public class MethodReference extends SpelNodeImpl {
 		private final Object[] arguments;
 
 		public MethodValueRef(ExpressionState state, Object[] arguments) {
+			this.expressionState = state;
 			this.evaluationContext = state.getEvaluationContext();
 			this.value = state.getActiveContextObject().getValue();
 			this.targetType = state.getActiveContextObject().getTypeDescriptor();
@@ -340,7 +345,7 @@ public class MethodReference extends SpelNodeImpl {
 		@Override
 		public TypedValue getValue() {
 			TypedValue result = MethodReference.this.getValueInternal(
-					this.evaluationContext, this.value, this.targetType, this.arguments);
+					this.expressionState, this.evaluationContext, this.value, this.targetType, this.arguments);
 			updateExitTypeDescriptor();
 			return result;
 		}

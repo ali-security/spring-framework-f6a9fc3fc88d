@@ -135,7 +135,7 @@ public class Indexer extends SpelNodeImpl {
 				key = state.convertValue(key, targetDescriptor.getMapKeyTypeDescriptor());
 			}
 			this.indexedType = IndexedType.MAP;
-			return new MapIndexingValueRef(state.getTypeConverter(), (Map<?, ?>) targetObject, key, targetDescriptor);
+			return new MapIndexingValueRef(state, state.getTypeConverter(), (Map<?, ?>) targetObject, key, targetDescriptor);
 		}
 
 		if (targetObject == null) {
@@ -148,19 +148,19 @@ public class Indexer extends SpelNodeImpl {
 			int idx = (Integer) state.convertValue(index, TypeDescriptor.valueOf(Integer.class));
 			if (targetObject.getClass().isArray()) {
 				this.indexedType = IndexedType.ARRAY;
-				return new ArrayIndexingValueRef(state.getTypeConverter(), targetObject, idx, targetDescriptor);
+				return new ArrayIndexingValueRef(state, state.getTypeConverter(), targetObject, idx, targetDescriptor);
 			}
 			else if (targetObject instanceof Collection) {
 				if (targetObject instanceof List) {
 					this.indexedType = IndexedType.LIST;
 				}
-				return new CollectionIndexingValueRef((Collection<?>) targetObject, idx, targetDescriptor,
+				return new CollectionIndexingValueRef(state, (Collection<?>) targetObject, idx, targetDescriptor,
 						state.getTypeConverter(), state.getConfiguration().isAutoGrowCollections(),
 						state.getConfiguration().getMaximumAutoGrowSize());
 			}
 			else {
 				this.indexedType = IndexedType.STRING;
-				return new StringIndexingLValue((String) targetObject, idx, targetDescriptor);
+				return new StringIndexingLValue(state, (String) targetObject, idx, targetDescriptor);
 			}
 		}
 
@@ -168,7 +168,7 @@ public class Indexer extends SpelNodeImpl {
 		// TODO could call the conversion service to convert the value to a String
 		if (String.class == indexValue.getTypeDescriptor().getType()) {
 			this.indexedType = IndexedType.OBJECT;
-			return new PropertyIndexingValueRef(targetObject, (String) indexValue.getValue(),
+			return new PropertyIndexingValueRef(state, targetObject, (String) indexValue.getValue(),
 					state.getEvaluationContext(), targetDescriptor);
 		}
 
@@ -436,6 +436,8 @@ public class Indexer extends SpelNodeImpl {
 
 	private class ArrayIndexingValueRef implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final TypeConverter typeConverter;
 
 		private final Object array;
@@ -444,7 +446,8 @@ public class Indexer extends SpelNodeImpl {
 
 		private final TypeDescriptor typeDescriptor;
 
-		ArrayIndexingValueRef(TypeConverter typeConverter, Object array, int index, TypeDescriptor typeDescriptor) {
+		ArrayIndexingValueRef(ExpressionState expressionState, TypeConverter typeConverter, Object array, int index, TypeDescriptor typeDescriptor) {
+			this.expressionState = expressionState;
 			this.typeConverter = typeConverter;
 			this.array = array;
 			this.index = index;
@@ -453,12 +456,14 @@ public class Indexer extends SpelNodeImpl {
 
 		@Override
 		public TypedValue getValue() {
+			this.expressionState.trackOperation();
 			Object arrayElement = accessArrayElement(this.array, this.index);
 			return new TypedValue(arrayElement, this.typeDescriptor.elementTypeDescriptor(arrayElement));
 		}
 
 		@Override
 		public void setValue(Object newValue) {
+			this.expressionState.trackOperation();
 			setArrayElement(this.typeConverter, this.array, this.index, newValue,
 					this.typeDescriptor.getElementTypeDescriptor().getType());
 		}
@@ -473,6 +478,8 @@ public class Indexer extends SpelNodeImpl {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	private class MapIndexingValueRef implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final TypeConverter typeConverter;
 
 		private final Map map;
@@ -481,7 +488,10 @@ public class Indexer extends SpelNodeImpl {
 
 		private final TypeDescriptor mapEntryDescriptor;
 
-		public MapIndexingValueRef(TypeConverter typeConverter, Map map, Object key, TypeDescriptor mapEntryDescriptor) {
+		public MapIndexingValueRef(ExpressionState expressionState,
+				TypeConverter typeConverter, Map map, Object key, TypeDescriptor mapEntryDescriptor) {
+
+			this.expressionState = expressionState;
 			this.typeConverter = typeConverter;
 			this.map = map;
 			this.key = key;
@@ -490,6 +500,7 @@ public class Indexer extends SpelNodeImpl {
 
 		@Override
 		public TypedValue getValue() {
+			this.expressionState.trackOperation();
 			Object value = this.map.get(this.key);
 			exitTypeDescriptor = CodeFlow.toDescriptor(Object.class);
 			return new TypedValue(value, this.mapEntryDescriptor.getMapValueTypeDescriptor(value));
@@ -501,6 +512,7 @@ public class Indexer extends SpelNodeImpl {
 				newValue = this.typeConverter.convertValue(newValue, TypeDescriptor.forObject(newValue),
 						this.mapEntryDescriptor.getMapValueTypeDescriptor());
 			}
+			this.expressionState.trackOperation();
 			this.map.put(this.key, newValue);
 		}
 
@@ -513,6 +525,8 @@ public class Indexer extends SpelNodeImpl {
 
 	private class PropertyIndexingValueRef implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final Object targetObject;
 
 		private final String name;
@@ -521,8 +535,10 @@ public class Indexer extends SpelNodeImpl {
 
 		private final TypeDescriptor targetObjectTypeDescriptor;
 
-		public PropertyIndexingValueRef(Object targetObject, String value, EvaluationContext evaluationContext,
-				TypeDescriptor targetObjectTypeDescriptor) {
+		public PropertyIndexingValueRef(ExpressionState expressionState, Object targetObject, String value,
+				EvaluationContext evaluationContext, TypeDescriptor targetObjectTypeDescriptor) {
+
+			this.expressionState = expressionState;
 			this.targetObject = targetObject;
 			this.name = value;
 			this.evaluationContext = evaluationContext;
@@ -537,6 +553,7 @@ public class Indexer extends SpelNodeImpl {
 						Indexer.this.cachedReadTargetType != null &&
 						Indexer.this.cachedReadTargetType.equals(targetObjectRuntimeClass)) {
 					// It is OK to use the cached accessor
+					this.expressionState.trackOperation();
 					return Indexer.this.cachedReadAccessor.read(this.evaluationContext, this.targetObject, this.name);
 				}
 				List<PropertyAccessor> accessorsToTry = AstUtils.getPropertyAccessorsToTry(
@@ -562,6 +579,7 @@ public class Indexer extends SpelNodeImpl {
 									Indexer.this.exitTypeDescriptor = CodeFlow.toDescriptor(((Method)member).getReturnType());
 								}
 							}
+							this.expressionState.trackOperation();
 							return accessor.read(this.evaluationContext, this.targetObject, this.name);
 						}
 					}
@@ -583,6 +601,7 @@ public class Indexer extends SpelNodeImpl {
 						Indexer.this.cachedWriteTargetType != null &&
 						Indexer.this.cachedWriteTargetType.equals(contextObjectClass)) {
 					// It is OK to use the cached accessor
+					this.expressionState.trackOperation();
 					Indexer.this.cachedWriteAccessor.write(this.evaluationContext, this.targetObject, this.name, newValue);
 					return;
 				}
@@ -594,6 +613,7 @@ public class Indexer extends SpelNodeImpl {
 							Indexer.this.cachedWriteName = this.name;
 							Indexer.this.cachedWriteTargetType = contextObjectClass;
 							Indexer.this.cachedWriteAccessor = accessor;
+							this.expressionState.trackOperation();
 							accessor.write(this.evaluationContext, this.targetObject, this.name, newValue);
 							return;
 						}
@@ -616,6 +636,8 @@ public class Indexer extends SpelNodeImpl {
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private class CollectionIndexingValueRef implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final Collection collection;
 
 		private final int index;
@@ -628,8 +650,11 @@ public class Indexer extends SpelNodeImpl {
 
 		private final int maximumSize;
 
-		public CollectionIndexingValueRef(Collection collection, int index, TypeDescriptor collectionEntryTypeDescriptor,
-				TypeConverter typeConverter, boolean growCollection, int maximumSize) {
+		public CollectionIndexingValueRef(ExpressionState expressionState, Collection collection, int index,
+				TypeDescriptor collectionEntryTypeDescriptor, TypeConverter typeConverter,
+				boolean growCollection, int maximumSize) {
+
+			this.expressionState = expressionState;
 			this.collection = collection;
 			this.index = index;
 			this.collectionEntryDescriptor = collectionEntryTypeDescriptor;
@@ -642,12 +667,14 @@ public class Indexer extends SpelNodeImpl {
 		public TypedValue getValue() {
 			growCollectionIfNecessary();
 			if (this.collection instanceof List) {
+				this.expressionState.trackOperation();
 				Object o = ((List) this.collection).get(this.index);
 				exitTypeDescriptor = CodeFlow.toDescriptor(Object.class);
 				return new TypedValue(o, this.collectionEntryDescriptor.elementTypeDescriptor(o));
 			}
 			int pos = 0;
 			for (Object o : this.collection) {
+				this.expressionState.trackOperation();
 				if (pos == this.index) {
 					return new TypedValue(o, this.collectionEntryDescriptor.elementTypeDescriptor(o));
 				}
@@ -665,6 +692,7 @@ public class Indexer extends SpelNodeImpl {
 					newValue = this.typeConverter.convertValue(newValue, TypeDescriptor.forObject(newValue),
 							this.collectionEntryDescriptor.getElementTypeDescriptor());
 				}
+				this.expressionState.trackOperation();
 				list.set(this.index, newValue);
 			}
 			else {
@@ -689,6 +717,7 @@ public class Indexer extends SpelNodeImpl {
 				try {
 					int newElements = this.index - this.collection.size();
 					while (newElements >= 0) {
+						this.expressionState.trackOperation();
 						(this.collection).add(elementType.getType().newInstance());
 						newElements--;
 					}
@@ -708,13 +737,16 @@ public class Indexer extends SpelNodeImpl {
 
 	private class StringIndexingLValue implements ValueRef {
 
+		private final ExpressionState expressionState;
+
 		private final String target;
 
 		private final int index;
 
 		private final TypeDescriptor typeDescriptor;
 
-		public StringIndexingLValue(String target, int index, TypeDescriptor typeDescriptor) {
+		public StringIndexingLValue(ExpressionState expressionState, String target, int index, TypeDescriptor typeDescriptor) {
+			this.expressionState = expressionState;
 			this.target = target;
 			this.index = index;
 			this.typeDescriptor = typeDescriptor;
@@ -726,6 +758,7 @@ public class Indexer extends SpelNodeImpl {
 				throw new SpelEvaluationException(getStartPosition(), SpelMessage.STRING_INDEX_OUT_OF_BOUNDS,
 						this.target.length(), this.index);
 			}
+			this.expressionState.trackOperation();
 			return new TypedValue(String.valueOf(this.target.charAt(this.index)));
 		}
 

@@ -51,6 +51,7 @@ public class TypeReference extends SpelNodeImpl {
 	public TypedValue getValueInternal(ExpressionState state) throws EvaluationException {
 		// TODO possible optimization here if we cache the discovered type reference, but can we do that?
 		String typeName = (String) this.children[0].getValueInternal(state).getValue();
+		state.trackOperation();
 		if (!typeName.contains(".") && Character.isLowerCase(typeName.charAt(0))) {
 			TypeCode tc = TypeCode.valueOf(typeName.toUpperCase());
 			if (tc != TypeCode.OBJECT) {
